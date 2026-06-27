@@ -117,7 +117,31 @@ export default function EventDetailsPage() {
 
       window.location.href = paymentRes.data.authorization_url;
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Purchase failed. Please try again.');
+      // Backend error shape can be either:
+      //   { message: "Unauthorized" }
+      // or a nested shape:
+      //   { message: { message: "Unauthorized", statusCode: 401 } }
+      // Always reduce it down to a plain string before storing in state,
+      // otherwise React throws "Objects are not valid as a React child"
+      // (minified React error #31) when {error} is rendered in JSX.
+      const data = err.response?.data;
+      const msg =
+        typeof data?.message === 'string'
+          ? data.message
+          : data?.message?.message || 'Purchase failed. Please try again.';
+
+      // If the backend rejected us as unauthorized, the stored token is
+      // stale/invalid — clear it and send the user to log in again instead
+      // of leaving them stuck on a "purchase failed" message that doesn't
+      // explain why.
+      if (err.response?.status === 401) {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        router.push('/login');
+        return;
+      }
+
+      setError(msg);
       setPurchasing(false);
     }
   };
@@ -237,7 +261,7 @@ export default function EventDetailsPage() {
               <h2 className="font-bold text-gray-900 mb-4">Share this event</h2>
               <div className="flex gap-3">
                 <a
-                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(event.title)}`}
+                  href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}&text=${encodeURIComponent(event.title)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
@@ -245,7 +269,7 @@ export default function EventDetailsPage() {
                   Twitter
                 </a>
                 <a
-                  href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`}
+                  href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
@@ -253,7 +277,7 @@ export default function EventDetailsPage() {
                   Facebook
                 </a>
                 <a
-                  href={`https://wa.me/?text=${encodeURIComponent(event.title + ' ' + window.location.href)}`}
+                  href={`https://wa.me/?text=${encodeURIComponent(event.title + ' ' + (typeof window !== 'undefined' ? window.location.href : ''))}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
