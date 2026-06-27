@@ -4,6 +4,8 @@ import { Suspense } from 'react';
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://eventful-cu78.onrender.com/api/v1';
+
 function AuthCallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -12,14 +14,31 @@ function AuthCallbackHandler() {
     const token = searchParams.get('token');
     const refresh = searchParams.get('refresh');
 
-    if (token && refresh) {
-      localStorage.setItem('accessToken', token);
-      localStorage.setItem('refreshToken', refresh);
-      router.push('/');
-    } else {
+    if (!token || !refresh) {
       router.push('/login');
+      return;
     }
-  }, []);
+
+    localStorage.setItem('accessToken', token);
+    localStorage.setItem('refreshToken', refresh);
+
+    fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch user');
+        return res.json();
+      })
+      .then(user => {
+        localStorage.setItem('user', JSON.stringify(user));
+        router.push('/');
+      })
+      .catch(() => {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        router.push('/login');
+      });
+  }, [searchParams, router]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
