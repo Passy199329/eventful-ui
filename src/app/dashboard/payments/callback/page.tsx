@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -31,7 +33,7 @@ function PaymentCallbackHandler() {
         }
       })
       .catch(() => setStatus('failed'));
-  }, []);
+  }, [searchParams, router]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
