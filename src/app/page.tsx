@@ -62,6 +62,18 @@ function EventCard({ event }: { event: Event }) {
 }
 
 function Navbar() {
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    const u = localStorage.getItem('user');
+    if (u) setUser(JSON.parse(u));
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.clear();
+    window.location.href = '/';
+  };
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -72,12 +84,28 @@ function Navbar() {
           <span className="font-bold text-gray-900 text-lg">Eventful</span>
         </a>
         <div className="flex items-center gap-3">
-          <a href="/login" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
-            Log in
-          </a>
-          <a href="/register" className="bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-            Sign up
-          </a>
+          {user ? (
+            <>
+              <a href="/dashboard" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
+                Dashboard
+              </a>
+              <a href="/my-tickets" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
+                My Tickets
+              </a>
+              <button onClick={handleLogout} className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
+                Log out
+              </button>
+            </>
+          ) : (
+            <>
+              <a href="/login" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
+                Log in
+              </a>
+              <a href="/register" className="bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                Sign up
+              </a>
+            </>
+          )}
         </div>
       </div>
     </nav>
