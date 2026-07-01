@@ -45,6 +45,13 @@ function Sidebar({ active }: { active: string }) {
   );
 }
 
+interface TicketTier {
+  name: string;
+  price: number;
+  capacity: number;
+  sold: number;
+}
+
 interface Event {
   _id: string;
   title: string;
@@ -52,9 +59,7 @@ interface Event {
   location: string;
   startDate: string;
   endDate: string;
-  price: number;
-  capacity?: number;
-  ticketsSold?: number;
+  ticketTiers: TicketTier[];
   bannerImage?: string;
   creatorId: string;
   status?: string;
@@ -66,16 +71,32 @@ interface EditFormState {
   location: string;
   startDate: string;
   endDate: string;
-  price: string;
-  capacity: string;
   bannerImage: string;
 }
 
 function toLocalInputValue(iso: string) {
-  // Converts an ISO date string to the value format <input type="datetime-local"> expects
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function priceRange(tiers: TicketTier[]): string {
+  if (!tiers || tiers.length === 0) return 'No tiers';
+  const prices = tiers.map(t => t.price);
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  if (min === 0 && max === 0) return 'Free';
+  if (min === max) return min === 0 ? 'Free' : `₦${min.toLocaleString()}`;
+  if (min === 0) return `Free – ₦${max.toLocaleString()}`;
+  return `₦${min.toLocaleString()} – ₦${max.toLocaleString()}`;
+}
+
+function totalCapacity(tiers: TicketTier[]): number {
+  return tiers?.reduce((sum, t) => sum + t.capacity, 0) ?? 0;
+}
+
+function totalSold(tiers: TicketTier[]): number {
+  return tiers?.reduce((sum, t) => sum + t.sold, 0) ?? 0;
 }
 
 export default function MyEventsPage() {
@@ -135,8 +156,6 @@ export default function MyEventsPage() {
       location: event.location,
       startDate: toLocalInputValue(event.startDate),
       endDate: toLocalInputValue(event.endDate),
-      price: String(event.price),
-      capacity: event.capacity != null ? String(event.capacity) : '',
       bannerImage: event.bannerImage || '',
     });
   };
@@ -159,27 +178,14 @@ export default function MyEventsPage() {
 
   const validateEdit = (form: EditFormState): boolean => {
     const errors: Record<string, string> = {};
-
     if (!form.title.trim()) errors.title = 'Title is required';
     if (!form.description.trim()) errors.description = 'Description is required';
     if (!form.location.trim()) errors.location = 'Location is required';
     if (!form.startDate) errors.startDate = 'Start date & time is required';
     if (!form.endDate) errors.endDate = 'End date & time is required';
-
     if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) {
       errors.endDate = 'End must be after start';
     }
-
-    const price = Number(form.price);
-    if (form.price === '' || Number.isNaN(price) || price < 0) {
-      errors.price = 'Enter a valid price (0 for free)';
-    }
-
-    const capacity = Number(form.capacity);
-    if (form.capacity === '' || !Number.isInteger(capacity) || capacity < 1) {
-      errors.capacity = 'Capacity must be at least 1';
-    }
-
     setEditFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -188,14 +194,10 @@ export default function MyEventsPage() {
     e.preventDefault();
     if (!editForm || !editingEvent) return;
     setEditError('');
-
     if (!validateEdit(editForm)) return;
 
     const token = localStorage.getItem('accessToken');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
+    if (!token) { router.push('/login'); return; }
 
     setSaving(true);
     try {
@@ -205,8 +207,6 @@ export default function MyEventsPage() {
         location: editForm.location.trim(),
         startDate: new Date(editForm.startDate).toISOString(),
         endDate: new Date(editForm.endDate).toISOString(),
-        price: Number(editForm.price),
-        capacity: Number(editForm.capacity),
         ...(editForm.bannerImage.trim() && { bannerImage: editForm.bannerImage.trim() }),
       };
 
@@ -239,10 +239,7 @@ export default function MyEventsPage() {
   const confirmDelete = async () => {
     if (!deletingEvent) return;
     const token = localStorage.getItem('accessToken');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
+    if (!token) { router.push('/login'); return; }
 
     setDeleting(true);
     setDeleteError('');
@@ -283,10 +280,8 @@ export default function MyEventsPage() {
               <h1 className="text-2xl font-black text-gray-900">My Events</h1>
               <p className="text-gray-500 text-sm mt-1">Manage the events you've created</p>
             </div>
-            <a
-              href="/dashboard/events/create"
-              className="bg-violet-600 hover:bg-violet-700 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-colors"
-            >
+            <a href="/dashboard/events/create"
+              className="bg-violet-600 hover:bg-violet-700 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-colors">
               + Create event
             </a>
           </div>
@@ -313,10 +308,8 @@ export default function MyEventsPage() {
           ) : (
             <div className="space-y-3">
               {events.map(event => (
-                <div
-                  key={event._id}
-                  className="bg-white rounded-2xl border border-gray-100 p-5 flex items-center gap-4"
-                >
+                <div key={event._id}
+                  className="bg-white rounded-2xl border border-gray-100 p-5 flex items-center gap-4">
                   <div className="w-20 h-20 rounded-xl overflow-hidden bg-gradient-to-br from-violet-500 to-purple-700 flex-shrink-0 flex items-center justify-center">
                     {event.bannerImage ? (
                       <img src={event.bannerImage} alt={event.title} className="w-full h-full object-cover" />
@@ -326,38 +319,36 @@ export default function MyEventsPage() {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <a
-                      href={`/events/${event._id}`}
-                      className="font-bold text-gray-900 hover:text-violet-600 transition-colors truncate block"
-                    >
+                    <a href={`/events/${event._id}`}
+                      className="font-bold text-gray-900 hover:text-violet-600 transition-colors truncate block">
                       {event.title}
                     </a>
                     <p className="text-gray-500 text-sm truncate">{event.location}</p>
                     <p className="text-gray-400 text-xs mt-0.5">
                       {formatDate(event.startDate)}
-                      {event.capacity != null && (
-                        <> · {event.ticketsSold ?? 0}/{event.capacity} sold</>
+                      {event.ticketTiers?.length > 0 && (
+                        <> · {totalSold(event.ticketTiers)}/{totalCapacity(event.ticketTiers)} sold</>
                       )}
                     </p>
                   </div>
 
                   <div className="text-right flex-shrink-0">
                     <p className="font-bold text-gray-900 text-sm">
-                      {event.price === 0 ? 'Free' : `₦${event.price.toLocaleString()}`}
+                      {priceRange(event.ticketTiers)}
                     </p>
                   </div>
 
                   <div className="flex gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => openEdit(event)}
-                      className="px-3 py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 text-sm font-medium transition-colors"
-                    >
+                    <a href="/dashboard/check-in"
+                      className="px-3 py-2 rounded-xl border border-violet-100 text-violet-600 hover:bg-violet-50 text-sm font-medium transition-colors">
+                      Check in
+                    </a>
+                    <button onClick={() => openEdit(event)}
+                      className="px-3 py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 text-sm font-medium transition-colors">
                       Edit
                     </button>
-                    <button
-                      onClick={() => { setDeletingEvent(event); setDeleteError(''); }}
-                      className="px-3 py-2 rounded-xl border border-red-100 text-red-600 hover:bg-red-50 text-sm font-medium transition-colors"
-                    >
+                    <button onClick={() => { setDeletingEvent(event); setDeleteError(''); }}
+                      className="px-3 py-2 rounded-xl border border-red-100 text-red-600 hover:bg-red-50 text-sm font-medium transition-colors">
                       Delete
                     </button>
                   </div>
@@ -374,13 +365,9 @@ export default function MyEventsPage() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 my-8">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-bold text-gray-900 text-lg">Edit event</h2>
-              <button
-                onClick={closeEdit}
+              <button onClick={closeEdit}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-                aria-label="Close"
-              >
-                ×
-              </button>
+                aria-label="Close">×</button>
             </div>
 
             {editError && (
@@ -392,126 +379,75 @@ export default function MyEventsPage() {
             <form onSubmit={handleEditSubmit} className="space-y-4">
               <div>
                 <label htmlFor="edit-title" className="block text-sm font-medium text-gray-700 mb-1.5">Title</label>
-                <input
-                  id="edit-title"
-                  name="title"
-                  type="text"
-                  value={editForm.title}
-                  onChange={handleEditChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                />
+                <input id="edit-title" name="title" type="text" value={editForm.title} onChange={handleEditChange}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
                 {editFieldErrors.title && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.title}</p>}
               </div>
 
               <div>
                 <label htmlFor="edit-description" className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
-                <textarea
-                  id="edit-description"
-                  name="description"
-                  value={editForm.description}
-                  onChange={handleEditChange}
+                <textarea id="edit-description" name="description" value={editForm.description} onChange={handleEditChange}
                   rows={3}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm resize-none"
-                />
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm resize-none" />
                 {editFieldErrors.description && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.description}</p>}
               </div>
 
               <div>
                 <label htmlFor="edit-location" className="block text-sm font-medium text-gray-700 mb-1.5">Location</label>
-                <input
-                  id="edit-location"
-                  name="location"
-                  type="text"
-                  value={editForm.location}
-                  onChange={handleEditChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                />
+                <input id="edit-location" name="location" type="text" value={editForm.location} onChange={handleEditChange}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
                 {editFieldErrors.location && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.location}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="edit-startDate" className="block text-sm font-medium text-gray-700 mb-1.5">Start</label>
-                  <input
-                    id="edit-startDate"
-                    name="startDate"
-                    type="datetime-local"
-                    value={editForm.startDate}
-                    onChange={handleEditChange}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
+                  <input id="edit-startDate" name="startDate" type="datetime-local" value={editForm.startDate} onChange={handleEditChange}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
                   {editFieldErrors.startDate && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.startDate}</p>}
                 </div>
                 <div>
                   <label htmlFor="edit-endDate" className="block text-sm font-medium text-gray-700 mb-1.5">End</label>
-                  <input
-                    id="edit-endDate"
-                    name="endDate"
-                    type="datetime-local"
-                    value={editForm.endDate}
-                    onChange={handleEditChange}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
+                  <input id="edit-endDate" name="endDate" type="datetime-local" value={editForm.endDate} onChange={handleEditChange}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
                   {editFieldErrors.endDate && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.endDate}</p>}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="edit-price" className="block text-sm font-medium text-gray-700 mb-1.5">Price (₦)</label>
-                  <input
-                    id="edit-price"
-                    name="price"
-                    type="number"
-                    min={0}
-                    value={editForm.price}
-                    onChange={handleEditChange}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
-                  {editFieldErrors.price && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.price}</p>}
-                </div>
-                <div>
-                  <label htmlFor="edit-capacity" className="block text-sm font-medium text-gray-700 mb-1.5">Capacity</label>
-                  <input
-                    id="edit-capacity"
-                    name="capacity"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={editForm.capacity}
-                    onChange={handleEditChange}
-                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
-                  {editFieldErrors.capacity && <p className="text-red-500 text-xs mt-1.5">{editFieldErrors.capacity}</p>}
                 </div>
               </div>
 
               <div>
                 <label htmlFor="edit-bannerImage" className="block text-sm font-medium text-gray-700 mb-1.5">Banner image URL</label>
-                <input
-                  id="edit-bannerImage"
-                  name="bannerImage"
-                  type="url"
-                  value={editForm.bannerImage}
-                  onChange={handleEditChange}
+                <input id="edit-bannerImage" name="bannerImage" type="url" value={editForm.bannerImage} onChange={handleEditChange}
                   placeholder="https://example.com/image.jpg"
-                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                />
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
               </div>
 
+              {/* Read-only tier display */}
+              {editingEvent.ticketTiers?.length > 0 && (
+                <div>
+                  <p className="block text-sm font-medium text-gray-700 mb-2">
+                    Ticket tiers <span className="text-gray-400 font-normal">(cannot be changed after creation)</span>
+                  </p>
+                  <div className="space-y-2">
+                    {editingEvent.ticketTiers.map(tier => (
+                      <div key={tier.name} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5">
+                        <span className="text-sm font-medium text-gray-700">{tier.name}</span>
+                        <div className="flex items-center gap-4 text-sm text-gray-500">
+                          <span>{tier.price === 0 ? 'Free' : `₦${tier.price.toLocaleString()}`}</span>
+                          <span>{tier.sold}/{tier.capacity} sold</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeEdit}
-                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition-colors text-sm"
-                >
+                <button type="button" onClick={closeEdit}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition-colors text-sm">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
-                >
+                <button type="submit" disabled={saving}
+                  className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm">
                   {saving ? 'Saving...' : 'Save changes'}
                 </button>
               </div>
@@ -536,18 +472,12 @@ export default function MyEventsPage() {
             )}
 
             <div className="flex gap-3">
-              <button
-                onClick={() => setDeletingEvent(null)}
-                disabled={deleting}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition-colors text-sm"
-              >
+              <button onClick={() => setDeletingEvent(null)} disabled={deleting}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl transition-colors text-sm">
                 Cancel
               </button>
-              <button
-                onClick={confirmDelete}
-                disabled={deleting}
-                className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
-              >
+              <button onClick={confirmDelete} disabled={deleting}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm">
                 {deleting ? 'Deleting...' : 'Delete'}
               </button>
             </div>

@@ -5,6 +5,13 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
+interface TicketTier {
+  name: string;
+  price: number;
+  capacity: number;
+  sold: number;
+}
+
 interface Event {
   _id: string;
   title: string;
@@ -12,7 +19,7 @@ interface Event {
   location: string;
   startDate: string;
   endDate: string;
-  price: number;
+  ticketTiers: TicketTier[];
   bannerImage?: string;
   creatorId: string;
 }
@@ -21,6 +28,19 @@ function EventCard({ event }: { event: Event }) {
   const date = new Date(event.startDate);
   const day = date.toLocaleDateString('en-US', { day: '2-digit' });
   const month = date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+
+  const tiers = event.ticketTiers ?? [];
+  const prices = tiers.map(t => t.price);
+  const minPrice = prices.length > 0 ? Math.min(...prices) : null;
+  const maxPrice = prices.length > 0 ? Math.max(...prices) : null;
+
+  const priceLabel = () => {
+    if (prices.length === 0) return 'No tiers';
+    if (minPrice === 0 && maxPrice === 0) return 'Free';
+    if (minPrice === maxPrice) return minPrice === 0 ? 'Free' : `₦${minPrice!.toLocaleString()}`;
+    if (minPrice === 0) return `Free – ₦${maxPrice!.toLocaleString()}`;
+    return `₦${minPrice!.toLocaleString()} – ₦${maxPrice!.toLocaleString()}`;
+  };
 
   return (
     <a href={`/events/${event._id}`} className="group block">
@@ -52,7 +72,7 @@ function EventCard({ event }: { event: Event }) {
               <span className="truncate max-w-[140px]">{event.location}</span>
             </div>
             <span className="font-bold text-violet-600 text-sm">
-              {event.price === 0 ? 'Free' : `₦${event.price.toLocaleString()}`}
+              {priceLabel()}
             </span>
           </div>
         </div>

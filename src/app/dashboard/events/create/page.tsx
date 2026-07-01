@@ -45,14 +45,18 @@ function Sidebar({ active }: { active: string }) {
   );
 }
 
+interface TierForm {
+  name: string;
+  price: string;
+  capacity: string;
+}
+
 interface FormState {
   title: string;
   description: string;
   location: string;
   startDate: string;
   endDate: string;
-  price: string;
-  capacity: string;
   bannerImage: string;
 }
 
@@ -62,10 +66,10 @@ const initialForm: FormState = {
   location: '',
   startDate: '',
   endDate: '',
-  price: '',
-  capacity: '',
   bannerImage: '',
 };
+
+const defaultTier = (): TierForm => ({ name: '', price: '', capacity: '' });
 
 export default function CreateEventPage() {
   const router = useRouter();
@@ -73,60 +77,78 @@ export default function CreateEventPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState<FormState>(initialForm);
+  const [tiers, setTiers] = useState<TierForm[]>([defaultTier()]);
+  const [tierErrors, setTierErrors] = useState<Record<string, string>[]>([{}]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
     setError('');
     if (fieldErrors[name]) {
-      setFieldErrors(prev => {
-        const next = { ...prev };
-        delete next[name];
-        return next;
-      });
+      setFieldErrors(prev => { const n = { ...prev }; delete n[name]; return n; });
     }
+  };
+
+  const handleTierChange = (index: number, field: keyof TierForm, value: string) => {
+    setTiers(prev => prev.map((t, i) => i === index ? { ...t, [field]: value } : t));
+    setTierErrors(prev => prev.map((e, i) => {
+      if (i !== index) return e;
+      const n = { ...e }; delete n[field]; return n;
+    }));
+  };
+
+  const addTier = () => {
+    setTiers(prev => [...prev, defaultTier()]);
+    setTierErrors(prev => [...prev, {}]);
+  };
+
+  const removeTier = (index: number) => {
+    if (tiers.length === 1) return;
+    setTiers(prev => prev.filter((_, i) => i !== index));
+    setTierErrors(prev => prev.filter((_, i) => i !== index));
   };
 
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
-
     if (!form.title.trim()) errors.title = 'Title is required';
     if (!form.description.trim()) errors.description = 'Description is required';
     if (!form.location.trim()) errors.location = 'Location is required';
     if (!form.startDate) errors.startDate = 'Start date & time is required';
     if (!form.endDate) errors.endDate = 'End date & time is required';
-
-    if (form.startDate && form.endDate) {
-      if (new Date(form.endDate) <= new Date(form.startDate)) {
-        errors.endDate = 'End must be after start';
-      }
+    if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) {
+      errors.endDate = 'End must be after start';
     }
-
-    const price = Number(form.price);
-    if (form.price === '' || Number.isNaN(price) || price < 0) {
-      errors.price = 'Enter a valid price (0 for free)';
-    }
-
-    const capacity = Number(form.capacity);
-    if (form.capacity === '' || !Number.isInteger(capacity) || capacity < 1) {
-      errors.capacity = 'Capacity must be at least 1';
-    }
-
     setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
+
+    const newTierErrors = tiers.map(tier => {
+      const te: Record<string, string> = {};
+      if (!tier.name.trim()) te.name = 'Tier name is required';
+      const price = Number(tier.price);
+      if (tier.price === '' || Number.isNaN(price) || price < 0) te.price = 'Enter a valid price (0 for free)';
+      const capacity = Number(tier.capacity);
+      if (tier.capacity === '' || !Number.isInteger(capacity) || capacity < 1) te.capacity = 'Capacity must be at least 1';
+      return te;
+    });
+    setTierErrors(newTierErrors);
+
+    const tierNamesUnique = new Set(tiers.map(t => t.name.trim().toLowerCase()));
+    if (tierNamesUnique.size < tiers.length) {
+      setError('Each ticket tier must have a unique name');
+      return false;
+    }
+
+    const hasFieldErrors = Object.keys(errors).length > 0;
+    const hasTierErrors = newTierErrors.some(te => Object.keys(te).length > 0);
+    return !hasFieldErrors && !hasTierErrors;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
     if (!validate()) return;
 
     const token = localStorage.getItem('accessToken');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
+    if (!token) { router.push('/login'); return; }
 
     setLoading(true);
     try {
@@ -136,8 +158,11 @@ export default function CreateEventPage() {
         location: form.location.trim(),
         startDate: new Date(form.startDate).toISOString(),
         endDate: new Date(form.endDate).toISOString(),
-        price: Number(form.price),
-        capacity: Number(form.capacity),
+        ticketTiers: tiers.map(t => ({
+          name: t.name.trim(),
+          price: Number(t.price),
+          capacity: Number(t.capacity),
+        })),
         ...(form.bannerImage.trim() && { bannerImage: form.bannerImage.trim() }),
       };
 
@@ -171,161 +196,153 @@ export default function CreateEventPage() {
       <main className="flex-1 ml-64 p-8">
         <div className="max-w-2xl mx-auto">
           <div className="mb-8">
-            <a href="/dashboard" className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-900 text-sm mb-4 transition-colors">
-              ← Back to dashboard
+            <a href="/dashboard/events" className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-900 text-sm mb-4 transition-colors">
+              ← Back to events
             </a>
             <h1 className="text-2xl font-black text-gray-900">Create Event</h1>
             <p className="text-gray-500 text-sm mt-1">Fill in the details to publish your event</p>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-100 p-8">
-            {error && (
-              <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl px-4 py-3 mb-6">{error}</div>
-            )}
+          {error && (
+            <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl px-4 py-3 mb-6">{error}</div>
+          )}
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+
+            {/* Basic info */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
+              <h2 className="font-bold text-gray-900">Basic info</h2>
+
               <div>
                 <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1.5">Event title *</label>
-                <input
-                  id="title"
-                  type="text"
-                  name="title"
-                  value={form.title}
-                  onChange={handleChange}
+                <input id="title" type="text" name="title" value={form.title} onChange={handleChange}
                   placeholder="e.g. Lagos Music Festival 2026"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-                />
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm" />
                 {fieldErrors.title && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.title}</p>}
               </div>
 
               <div>
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1.5">Description *</label>
-                <textarea
-                  id="description"
-                  name="description"
-                  value={form.description}
-                  onChange={handleChange}
-                  placeholder="Describe your event..."
-                  rows={4}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm resize-none"
-                />
+                <textarea id="description" name="description" value={form.description} onChange={handleChange}
+                  placeholder="Describe your event..." rows={4}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm resize-none" />
                 {fieldErrors.description && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.description}</p>}
               </div>
 
               <div>
                 <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-1.5">Location *</label>
-                <input
-                  id="location"
-                  type="text"
-                  name="location"
-                  value={form.location}
-                  onChange={handleChange}
+                <input id="location" type="text" name="location" value={form.location} onChange={handleChange}
                   placeholder="e.g. Eko Hotel, Lagos"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-                />
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm" />
                 {fieldErrors.location && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.location}</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1.5">Start date &amp; time *</label>
-                  <input
-                    id="startDate"
-                    type="datetime-local"
-                    name="startDate"
-                    value={form.startDate}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
-                  {fieldErrors.startDate && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.startDate}</p>}
-                </div>
-                <div>
-                  <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1.5">End date &amp; time *</label>
-                  <input
-                    id="endDate"
-                    type="datetime-local"
-                    name="endDate"
-                    value={form.endDate}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm"
-                  />
-                  {fieldErrors.endDate && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.endDate}</p>}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1.5">Ticket price (₦) *</label>
-                  <input
-                    id="price"
-                    type="number"
-                    name="price"
-                    value={form.price}
-                    onChange={handleChange}
-                    placeholder="0 for free events"
-                    min={0}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-                  />
-                  {fieldErrors.price && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.price}</p>}
-                </div>
-                <div>
-                  <label htmlFor="capacity" className="block text-sm font-medium text-gray-700 mb-1.5">Capacity *</label>
-                  <input
-                    id="capacity"
-                    type="number"
-                    name="capacity"
-                    value={form.capacity}
-                    onChange={handleChange}
-                    placeholder="Total tickets available"
-                    min={1}
-                    step={1}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-                  />
-                  {fieldErrors.capacity && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.capacity}</p>}
-                </div>
-              </div>
-
               <div>
-                <label htmlFor="bannerImage" className="block text-sm font-medium text-gray-700 mb-1.5">Banner image URL (optional)</label>
-                <input
-                  id="bannerImage"
-                  type="url"
-                  name="bannerImage"
-                  value={form.bannerImage}
-                  onChange={handleChange}
+                <label htmlFor="bannerImage" className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Banner image URL <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <input id="bannerImage" type="url" name="bannerImage" value={form.bannerImage} onChange={handleChange}
                   placeholder="https://example.com/image.jpg"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm"
-                />
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 placeholder-gray-400 text-sm" />
                 {form.bannerImage && (
                   <div className="mt-3 rounded-xl overflow-hidden h-40">
-                    <img
-                      src={form.bannerImage}
-                      alt="Preview"
-                      className="w-full h-full object-cover"
-                      onError={e => (e.currentTarget.style.display = 'none')}
-                    />
+                    <img src={form.bannerImage} alt="Preview" className="w-full h-full object-cover"
+                      onError={e => (e.currentTarget.style.display = 'none')} />
                   </div>
                 )}
               </div>
+            </div>
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboard')}
-                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition-colors text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
-                >
-                  {loading ? 'Publishing...' : 'Publish Event'}
+            {/* Date & time */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
+              <h2 className="font-bold text-gray-900">Date &amp; time</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1.5">Start *</label>
+                  <input id="startDate" type="datetime-local" name="startDate" value={form.startDate} onChange={handleChange}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
+                  {fieldErrors.startDate && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.startDate}</p>}
+                </div>
+                <div>
+                  <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1.5">End *</label>
+                  <input id="endDate" type="datetime-local" name="endDate" value={form.endDate} onChange={handleChange}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition-all text-gray-900 text-sm" />
+                  {fieldErrors.endDate && <p className="text-red-500 text-xs mt-1.5">{fieldErrors.endDate}</p>}
+                </div>
+              </div>
+            </div>
+
+            {/* Ticket tiers */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold text-gray-900">Ticket tiers</h2>
+                  <p className="text-gray-400 text-xs mt-0.5">Tiers can't be changed after the event is created</p>
+                </div>
+                <button type="button" onClick={addTier}
+                  className="text-violet-600 hover:text-violet-700 text-sm font-medium transition-colors">
+                  + Add tier
                 </button>
               </div>
-            </form>
-          </div>
+
+              <div className="space-y-4">
+                {tiers.map((tier, index) => (
+                  <div key={index} className="bg-gray-50 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">
+                        Tier {index + 1}
+                      </span>
+                      {tiers.length > 1 && (
+                        <button type="button" onClick={() => removeTier(index)}
+                          className="text-red-400 hover:text-red-600 text-xs font-medium transition-colors">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tier name</label>
+                      <input type="text" value={tier.name}
+                        onChange={e => handleTierChange(index, 'name', e.target.value)}
+                        placeholder="e.g. Regular, VIP, VVIP"
+                        className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 text-gray-900 placeholder-gray-400 text-sm" />
+                      {tierErrors[index]?.name && <p className="text-red-500 text-xs mt-1">{tierErrors[index].name}</p>}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Price (₦)</label>
+                        <input type="number" min={0} value={tier.price}
+                          onChange={e => handleTierChange(index, 'price', e.target.value)}
+                          placeholder="0 for free"
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 text-gray-900 placeholder-gray-400 text-sm" />
+                        {tierErrors[index]?.price && <p className="text-red-500 text-xs mt-1">{tierErrors[index].price}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Capacity</label>
+                        <input type="number" min={1} step={1} value={tier.capacity}
+                          onChange={e => handleTierChange(index, 'capacity', e.target.value)}
+                          placeholder="Max tickets"
+                          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 text-gray-900 placeholder-gray-400 text-sm" />
+                        {tierErrors[index]?.capacity && <p className="text-red-500 text-xs mt-1">{tierErrors[index].capacity}</p>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={() => router.push('/dashboard/events')}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl transition-colors text-sm">
+                Cancel
+              </button>
+              <button type="submit" disabled={loading}
+                className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold py-3 rounded-xl transition-colors text-sm">
+                {loading ? 'Publishing...' : 'Publish Event'}
+              </button>
+            </div>
+          </form>
         </div>
       </main>
     </div>

@@ -6,6 +6,13 @@ import { useParams, useRouter } from 'next/navigation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
+interface TicketTier {
+  name: string;
+  price: number;
+  capacity: number;
+  sold: number;
+}
+
 interface Event {
   _id: string;
   title: string;
@@ -13,7 +20,7 @@ interface Event {
   location: string;
   startDate: string;
   endDate: string;
-  price: number;
+  ticketTiers: TicketTier[];
   bannerImage?: string;
   creatorId: string;
 }
@@ -43,6 +50,9 @@ function Navbar() {
         <div className="flex items-center gap-3">
           {user ? (
             <>
+              <a href="/dashboard" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
+                Dashboard
+              </a>
               <a href="/my-tickets" className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors px-3 py-2">
                 My Tickets
               </a>
@@ -74,13 +84,16 @@ export default function EventDetailsPage() {
   const [error, setError] = useState('');
   const [purchasing, setPurchasing] = useState(false);
   const [quantity, setQuantity] = useState(1);
-  const [ticketType, setTicketType] = useState('Regular');
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [selectedTierName, setSelectedTierName] = useState('');
 
   useEffect(() => {
     axios.get(`${API_URL}/events/${params.id}`)
       .then(res => {
         setEvent(res.data);
+        // Default to the first available tier
+        if (res.data.ticketTiers?.length > 0) {
+          setSelectedTierName(res.data.ticketTiers[0].name);
+        }
         setLoading(false);
       })
       .catch(() => {
@@ -89,9 +102,25 @@ export default function EventDetailsPage() {
       });
   }, [params.id]);
 
+  // Derive the currently selected tier object from the event's tiers
+  const selectedTier = event?.ticketTiers?.find(t => t.name === selectedTierName);
+  const remainingInTier = selectedTier ? selectedTier.capacity - selectedTier.sold : 0;
+  const isSoldOut = remainingInTier <= 0;
+  const maxQuantity = Math.min(10, remainingInTier);
+
   const handlePurchase = async () => {
+    if (!selectedTier || isSoldOut) return;
+
     const token = localStorage.getItem('accessToken');
     if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (!user.email) {
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
       router.push('/login');
       return;
     }
@@ -100,40 +129,28 @@ export default function EventDetailsPage() {
     try {
       const ticketRes = await axios.post(
         `${API_URL}/tickets/purchase`,
-        { eventId: params.id, ticketType, quantity },
+        { eventId: params.id, ticketType: selectedTierName, quantity },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
       const paymentRes = await axios.post(
         `${API_URL}/payments/initialize`,
         {
           ticketId: ticketRes.data._id,
           email: user.email,
-          amount: event!.price * quantity,
+          amount: selectedTier.price * quantity,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       window.location.href = paymentRes.data.authorization_url;
     } catch (err: any) {
-      // Backend error shape can be either:
-      //   { message: "Unauthorized" }
-      // or a nested shape:
-      //   { message: { message: "Unauthorized", statusCode: 401 } }
-      // Always reduce it down to a plain string before storing in state,
-      // otherwise React throws "Objects are not valid as a React child"
-      // (minified React error #31) when {error} is rendered in JSX.
       const data = err.response?.data;
       const msg =
         typeof data?.message === 'string'
           ? data.message
           : data?.message?.message || 'Purchase failed. Please try again.';
 
-      // If the backend rejected us as unauthorized, the stored token is
-      // stale/invalid — clear it and send the user to log in again instead
-      // of leaving them stuck on a "purchase failed" message that doesn't
-      // explain why.
       if (err.response?.status === 401) {
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
@@ -146,21 +163,19 @@ export default function EventDetailsPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
+  const formatDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     });
-  };
 
-  const formatTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleTimeString('en-US', {
+  const formatTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
     });
-  };
 
   if (loading) {
     return (
@@ -256,6 +271,37 @@ export default function EventDetailsPage() {
               </div>
             </div>
 
+            {/* Ticket tiers overview */}
+            {event.ticketTiers?.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-6">
+                <h2 className="font-bold text-gray-900 mb-4">Ticket Tiers</h2>
+                <div className="space-y-3">
+                  {event.ticketTiers.map(tier => {
+                    const remaining = tier.capacity - tier.sold;
+                    const soldOut = remaining <= 0;
+                    return (
+                      <div key={tier.name}
+                        className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
+                        <div>
+                          <p className="font-medium text-gray-900 text-sm">{tier.name}</p>
+                          <p className="text-gray-400 text-xs mt-0.5">
+                            {soldOut ? (
+                              <span className="text-red-500">Sold out</span>
+                            ) : (
+                              <>{remaining} remaining</>
+                            )}
+                          </p>
+                        </div>
+                        <p className="font-bold text-violet-600 text-sm">
+                          {tier.price === 0 ? 'Free' : `₦${tier.price.toLocaleString()}`}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Share */}
             <div className="bg-white rounded-2xl border border-gray-100 p-6">
               <h2 className="font-bold text-gray-900 mb-4">Share this event</h2>
@@ -291,11 +337,21 @@ export default function EventDetailsPage() {
           {/* Right - Purchase */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-100 p-6 sticky top-24 space-y-5">
+
+              {/* Selected tier price */}
               <div>
                 <p className="text-gray-500 text-sm">Price per ticket</p>
                 <p className="text-3xl font-black text-gray-900">
-                  {event.price === 0 ? 'Free' : `₦${event.price.toLocaleString()}`}
+                  {selectedTier
+                    ? selectedTier.price === 0 ? 'Free' : `₦${selectedTier.price.toLocaleString()}`
+                    : '—'}
                 </p>
+                {selectedTier && isSoldOut && (
+                  <p className="text-red-500 text-xs mt-1">This tier is sold out</p>
+                )}
+                {selectedTier && !isSoldOut && (
+                  <p className="text-gray-400 text-xs mt-1">{remainingInTier} tickets left</p>
+                )}
               </div>
 
               {error && (
@@ -304,56 +360,72 @@ export default function EventDetailsPage() {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Ticket type
-                </label>
-                <select
-                  value={ticketType}
-                  onChange={e => setTicketType(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 text-gray-900 text-sm"
-                >
-                  <option value="Regular">Regular</option>
-                  <option value="VIP">VIP</option>
-                  <option value="VVIP">VVIP</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Quantity
-                </label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                    className="w-10 h-10 rounded-xl border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors"
+              {/* Tier selector */}
+              {event.ticketTiers?.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Ticket tier
+                  </label>
+                  <select
+                    value={selectedTierName}
+                    onChange={e => {
+                      setSelectedTierName(e.target.value);
+                      setQuantity(1);
+                      setError('');
+                    }}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 text-gray-900 text-sm"
                   >
-                    −
-                  </button>
-                  <span className="text-xl font-bold text-gray-900 w-8 text-center">{quantity}</span>
-                  <button
-                    onClick={() => setQuantity(q => Math.min(10, q + 1))}
-                    className="w-10 h-10 rounded-xl border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
-                    +
-                  </button>
+                    {event.ticketTiers.map(tier => (
+                      <option key={tier.name} value={tier.name} disabled={tier.capacity - tier.sold <= 0}>
+                        {tier.name} — {tier.price === 0 ? 'Free' : `₦${tier.price.toLocaleString()}`}
+                        {tier.capacity - tier.sold <= 0 ? ' (Sold out)' : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
+              )}
+
+              {/* Quantity */}
+              {!isSoldOut && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Quantity
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                      className="w-10 h-10 rounded-xl border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors"
+                    >
+                      −
+                    </button>
+                    <span className="text-xl font-bold text-gray-900 w-8 text-center">{quantity}</span>
+                    <button
+                      onClick={() => setQuantity(q => Math.min(maxQuantity, q + 1))}
+                      disabled={quantity >= maxQuantity}
+                      className="w-10 h-10 rounded-xl border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="border-t border-gray-100 pt-4">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-gray-500 text-sm">Total</span>
-                  <span className="font-bold text-gray-900">
-                    {event.price === 0 ? 'Free' : `₦${(event.price * quantity).toLocaleString()}`}
-                  </span>
-                </div>
+                {!isSoldOut && selectedTier && (
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-gray-500 text-sm">Total</span>
+                    <span className="font-bold text-gray-900">
+                      {selectedTier.price === 0 ? 'Free' : `₦${(selectedTier.price * quantity).toLocaleString()}`}
+                    </span>
+                  </div>
+                )}
 
                 <button
                   onClick={handlePurchase}
-                  disabled={purchasing}
+                  disabled={purchasing || isSoldOut || !selectedTier}
                   className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
                 >
-                  {purchasing ? 'Processing...' : 'Get tickets'}
+                  {purchasing ? 'Processing...' : isSoldOut ? 'Sold out' : 'Get tickets'}
                 </button>
 
                 <p className="text-center text-gray-400 text-xs mt-3">
